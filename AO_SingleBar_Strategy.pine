@@ -212,7 +212,7 @@ var int   prevClosedN = 0       // счётчик закрытых сделок 
 
 // Детектируем новую закрытую сделку и проверяем, был ли это SL
 if enableReversal and strategy.closedtrades > prevClosedN
-    _exitId = strategy.closedtrades.exit_id(0)
+    _exitId = strategy.closedtrades.exit_id(strategy.closedtrades - 1)
     if _exitId == "SL Sell" or _exitId == "SL Buy"
         revIsBuy    := _exitId == "SL Sell"   // Sell остановлен → разворот вверх
         revPending  := true
