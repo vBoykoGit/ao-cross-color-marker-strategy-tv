@@ -4,7 +4,7 @@
 //@version=6
 strategy("AO Single Bar Strategy", overlay = true, pyramiding = 0,
      default_qty_type  = strategy.percent_of_equity,
-     default_qty_value = 100,
+     default_qty_value = 1,
      commission_type   = strategy.commission.percent,
      commission_value  = 0.1,
      slippage          = 1,
