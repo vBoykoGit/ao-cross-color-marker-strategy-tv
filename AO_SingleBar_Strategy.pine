@@ -28,6 +28,8 @@ stopLookback   = input.int(5,  "Lookback баров для стопа", minval =
      tooltip = "Стоп устанавливается на максимальный High (для Sell) или минимальный Low (для Buy) за последние N баров от текущей точки входа")
 riskAmount     = input.float(1000.0, "Риск на сделку ($)", minval = 0.01,
      tooltip = "Фиксированный риск в долларах на каждую сделку. Размер позиции = Риск / |Вход − Стоп|")
+maxHoldBars    = input.int(20, "Макс. баров держания позиции", minval = 1,
+     tooltip = "Закрыть позицию по рынку если прошло N баров и текущий P&L >= 0 (в нуле или в плюсе)")
 
 // ── Переворот ──
 enableReversal  = input.bool(false, "Включить стратегию «Переворот»",   group = "Переворот",
@@ -178,6 +180,25 @@ if strategy.position_size > 0 and ta.crossover(close, ma34)
 // Сброс fixedStop при закрытии позиции
 if strategy.position_size == 0
     fixedStop := na
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Выход по времени: если позиция держится >= maxHoldBars баров и P&L >= 0
+// ─────────────────────────────────────────────────────────────────────────────
+var int posOpenBar = na
+
+// Фиксируем бар открытия при переходе из нуля в позицию
+if strategy.position_size != 0 and strategy.position_size[1] == 0
+    posOpenBar := bar_index
+
+// Закрываем по рынку если время вышло и позиция не в убытке
+if strategy.position_size != 0 and not na(posOpenBar)
+    if bar_index - posOpenBar >= maxHoldBars and strategy.openprofit >= 0
+        strategy.close_all(comment = "Time Exit")
+        posOpenBar := na
+
+// Сброс при закрытии позиции любым другим способом
+if strategy.position_size == 0
+    posOpenBar := na
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Стратегия «Переворот»
