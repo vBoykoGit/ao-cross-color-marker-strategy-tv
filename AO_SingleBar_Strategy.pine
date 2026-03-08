@@ -114,9 +114,9 @@ if pendingSell and strategy.position_size == 0
         strategy.cancel("Sell")
     else
         // Трейлинг к минимуму предыдущего бара (ждём пробой вниз)
-        // Стоп — максимальный High за stopLookback баров от текущего бара
+        // Стоп растёт только вверх (рэтчет) — исходный уровень от сигнала сохраняется
         pendingEntry := low[1]
-        pendingStop  := ta.highest(high, stopLookback)
+        pendingStop  := math.max(pendingStop, high[1])
         _riskDist     = math.abs(pendingStop - pendingEntry)
         _qty          = _riskDist > 0 ? riskAmount / _riskDist : 1.0
         strategy.entry("Sell", strategy.short, stop = pendingEntry, qty = _qty,
@@ -129,9 +129,9 @@ if pendingBuy and strategy.position_size == 0
         strategy.cancel("Buy")
     else
         // Трейлинг к максимуму предыдущего бара (ждём пробой вверх)
-        // Стоп — минимальный Low за stopLookback баров от текущего бара
+        // Стоп снижается только вниз (рэтчет) — исходный уровень от сигнала сохраняется
         pendingEntry := high[1]
-        pendingStop  := ta.lowest(low, stopLookback)
+        pendingStop  := math.min(pendingStop, low[1])
         _riskDist     = math.abs(pendingEntry - pendingStop)
         _qty          = _riskDist > 0 ? riskAmount / _riskDist : 1.0
         strategy.entry("Buy", strategy.long, stop = pendingEntry, qty = _qty,
