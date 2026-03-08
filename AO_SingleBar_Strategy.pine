@@ -1,0 +1,172 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © ao-cross-color-marker-strategy-tv
+
+//@version=6
+strategy("AO Single Bar Strategy", overlay = true, pyramiding = 0,
+     default_qty_type  = strategy.percent_of_equity,
+     default_qty_value = 100,
+     commission_type   = strategy.commission.percent,
+     commission_value  = 0.1,
+     slippage          = 1,
+     calc_on_every_tick = false)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Inputs
+// ─────────────────────────────────────────────────────────────────────────────
+aoAvgLen = input.int(100,  "AO Average Lookback",  minval = 10,
+     tooltip = "Количество баров для расчёта среднего AO в каждой зоне (>0 и <0)")
+ma34Len  = input.int(34,   "MA Exit Length",       minval = 1,
+     tooltip = "Период скользящей средней для выхода из позиции (синяя линия)")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AO Calculation  (идентично индикатору AO Cross & Color Markers)
+// ao[2] — сигнальный столбец (offset = -2 как в plotshape индикатора)
+// ─────────────────────────────────────────────────────────────────────────────
+ao = ta.sma(hl2, 5) - ta.sma(hl2, 34)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Single Bar Pattern
+// Три последних закрытых бара AO: colorPrevPrev, colorPrev (одиночный), colorNow
+// Паттерн: средний бар иного цвета, крайние одинакового цвета
+// ─────────────────────────────────────────────────────────────────────────────
+colorNow      = ao[1] > ao[2] ? 1 : ao[1] < ao[2] ? -1 : 0
+colorPrev     = ao[2] > ao[3] ? 1 : ao[2] < ao[3] ? -1 : 0
+colorPrevPrev = ao[3] > ao[4] ? 1 : ao[3] < ao[4] ? -1 : 0
+
+singleBar = colorPrevPrev != 0 and colorPrev != 0 and colorNow != 0
+         and colorPrev != colorPrevPrev
+         and colorPrev != colorNow
+         and colorPrevPrev == colorNow
+
+// ─────────────────────────────────────────────────────────────────────────────
+// AO Average — отдельно для положительной и отрицательной зон
+// Используем ao[1] (последний закрытый бар) для накопления статистики
+// ─────────────────────────────────────────────────────────────────────────────
+aoPos1      = ao[1] > 0 ? ao[1] : 0.0
+aoNeg1      = ao[1] < 0 ? ao[1] : 0.0
+aoPosCount1 = ao[1] > 0 ? 1.0   : 0.0
+aoNegCount1 = ao[1] < 0 ? 1.0   : 0.0
+
+sumPos = math.sum(aoPos1,      aoAvgLen)
+cntPos = math.sum(aoPosCount1, aoAvgLen)
+sumNeg = math.sum(aoNeg1,      aoAvgLen)
+cntNeg = math.sum(aoNegCount1, aoAvgLen)
+
+avgPos = cntPos > 0 ? sumPos / cntPos : na
+avgNeg = cntNeg > 0 ? sumNeg / cntNeg : na
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Сигнал: направление определяется ПОЗИЦИЕЙ ao[2] (цвет столбца игнорируется)
+//   strongSell — AO выше нуля И выше среднего положительной зоны → SHORT
+//   strongBuy  — AO ниже нуля И ниже среднего отрицательной зоны → LONG
+// ─────────────────────────────────────────────────────────────────────────────
+sellSignal = singleBar and ao[2] > 0
+buySignal  = singleBar and ao[2] < 0
+
+strongSell = sellSignal and not na(avgPos) and ao[2] >= avgPos
+strongBuy  = buySignal  and not na(avgNeg) and math.abs(ao[2]) >= math.abs(avgNeg)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MA34 — линия выхода из позиции
+// ─────────────────────────────────────────────────────────────────────────────
+ma34 = ta.sma(close, ma34Len)
+plot(ma34, "MA Exit", color = color.blue, linewidth = 2)
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Состояние отложенного ордера
+// ─────────────────────────────────────────────────────────────────────────────
+var bool  pendingSell   = false
+var bool  pendingBuy    = false
+var float pendingEntry  = na   // цена стоп-ордера (trailing)
+var float pendingStop   = na   // стоп-лосс при исполнении
+
+// При появлении сигнала — инициализируем отложенный ордер по сигнальному бару[2]
+// Противоположный сигнал сбрасывает предыдущее ожидание
+if strongSell and strategy.position_size == 0
+    pendingSell  := true
+    pendingBuy   := false
+    pendingEntry := low[2]
+    pendingStop  := high[2]
+
+if strongBuy and strategy.position_size == 0
+    pendingBuy   := true
+    pendingSell  := false
+    pendingEntry := high[2]
+    pendingStop  := low[2]
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Трейлинг отложенного ордера
+// Пока позиция не открыта — каждый бар обновляем ордер до экстремума
+// предыдущего закрытого бара. Стоп-лосс всегда соответствует тому же бару.
+// ─────────────────────────────────────────────────────────────────────────────
+if pendingSell and strategy.position_size == 0
+    // Обновляем к минимуму предыдущего бара (ждём пробой вниз)
+    pendingEntry := low[1]
+    pendingStop  := high[1]
+    strategy.entry("Sell", strategy.short, stop = pendingEntry,
+         comment = "SB Sell")
+
+if pendingBuy and strategy.position_size == 0
+    // Обновляем к максимуму предыдущего бара (ждём пробой вверх)
+    pendingEntry := high[1]
+    pendingStop  := low[1]
+    strategy.entry("Buy", strategy.long, stop = pendingEntry,
+         comment = "SB Buy")
+
+// ─────────────────────────────────────────────────────────────────────────────
+// После открытия позиции: фиксируем стоп-лосс и ждём MA34
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Фиксированный стоп-лосс (устанавливается при исполнении ордера)
+var float fixedStop = na
+
+// При переходе из ожидания к позиции — фиксируем стоп
+if strategy.position_size < 0 and pendingSell
+    pendingSell := false
+    fixedStop   := pendingStop
+
+if strategy.position_size > 0 and pendingBuy
+    pendingBuy := false
+    fixedStop  := pendingStop
+
+// Выход по стоп-лоссу (фиксированный)
+if strategy.position_size < 0 and not na(fixedStop)
+    strategy.exit("SL Sell", "Sell", stop = fixedStop)
+
+if strategy.position_size > 0 and not na(fixedStop)
+    strategy.exit("SL Buy", "Buy", stop = fixedStop)
+
+// Выход по MA34: цена пересекает MA34 в направлении цели
+//   SHORT: цена упала к MA34 (ниже нуля AO → MA34 ниже входа)
+//   LONG:  цена поднялась к MA34 (выше нуля AO → MA34 выше входа)
+if strategy.position_size < 0 and ta.crossunder(close, ma34)
+    strategy.close("Sell", comment = "TP MA34")
+
+if strategy.position_size > 0 and ta.crossover(close, ma34)
+    strategy.close("Buy", comment = "TP MA34")
+
+// Сброс fixedStop при закрытии позиции
+if strategy.position_size == 0
+    fixedStop := na
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Визуализация сигналов на ценовом графике
+// ─────────────────────────────────────────────────────────────────────────────
+plotshape(strongSell, title = "Sell Signal", style = shape.triangledown,
+     location = location.abovebar, color = color.red,
+     size = size.small, offset = -2)
+
+plotshape(strongBuy, title = "Buy Signal", style = shape.triangleup,
+     location = location.belowbar, color = color.green,
+     size = size.small, offset = -2)
+
+// Уровни отложенного ордера и стопа (пока нет позиции)
+plot(pendingSell and strategy.position_size == 0 ? pendingEntry : na,
+     "Pending Sell Entry", color = color.red,   style = plot.style_linebr, linewidth = 1)
+plot(pendingSell and strategy.position_size == 0 ? pendingStop  : na,
+     "Pending Sell Stop",  color = color.red,   style = plot.style_linebr, linewidth = 1)
+
+plot(pendingBuy and strategy.position_size == 0 ? pendingEntry : na,
+     "Pending Buy Entry",  color = color.green, style = plot.style_linebr, linewidth = 1)
+plot(pendingBuy and strategy.position_size == 0 ? pendingStop  : na,
+     "Pending Buy Stop",   color = color.green, style = plot.style_linebr, linewidth = 1)
