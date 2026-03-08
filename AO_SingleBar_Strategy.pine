@@ -168,13 +168,13 @@ if strategy.position_size < 0 and not na(fixedStop)
 if strategy.position_size > 0 and not na(fixedStop)
     strategy.exit("SL Buy", "Buy", stop = fixedStop)
 
-// Выход по MA34: цена пересекает MA34 в направлении цели
-//   SHORT: цена упала к MA34 (ниже нуля AO → MA34 ниже входа)
-//   LONG:  цена поднялась к MA34 (выше нуля AO → MA34 выше входа)
-if strategy.position_size < 0 and ta.crossunder(close, ma34)
+// Выход по MA34: close достиг или пересёк MA34 в направлении цели
+//   SHORT: close <= MA34 (цена упала до MA34 или ниже)
+//   LONG:  close >= MA34 (цена выросла до MA34 или выше)
+if strategy.position_size < 0 and close <= ma34
     strategy.close("Sell", comment = "TP MA34")
 
-if strategy.position_size > 0 and ta.crossover(close, ma34)
+if strategy.position_size > 0 and close >= ma34
     strategy.close("Buy", comment = "TP MA34")
 
 // Сброс fixedStop при закрытии позиции
