@@ -137,9 +137,9 @@ if pendingBuy and strategy.position_size == 0
         strategy.cancel("Buy")
     else
         // Трейлинг к максимуму предыдущего бара (ждём пробой вверх)
-        // Стоп снижается только вниз (рэтчет) — исходный уровень от сигнала сохраняется
+        // Стоп растёт только вверх (рэтчет) — бары ниже начального стопа игнорируются
         pendingEntry := high[1]
-        pendingStop  := math.min(pendingStop, low[1])
+        pendingStop  := math.max(pendingStop, low[1])
         _riskDist     = math.abs(pendingEntry - pendingStop)
         _qty          = _riskDist > 0 ? riskAmount / _riskDist : 1.0
         strategy.entry("Buy", strategy.long, stop = pendingEntry, qty = _qty,
