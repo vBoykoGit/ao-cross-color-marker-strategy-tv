@@ -29,6 +29,12 @@ stopLookback   = input.int(5,  "Lookback баров для стопа", minval =
 riskAmount     = input.float(1000.0, "Риск на сделку ($)", minval = 0.01,
      tooltip = "Фиксированный риск в долларах на каждую сделку. Размер позиции = Риск / |Вход − Стоп|")
 
+// ── Переворот ──
+enableReversal  = input.bool(false, "Включить стратегию «Переворот»",   group = "Переворот",
+     tooltip = "При срабатывании стоп-лосса открывать противоположную сделку по рынку")
+revLookback     = input.int(10,    "Lookback баров для стопа переворота", group = "Переворот", minval = 1,
+     tooltip = "Стоп переворота = highest(high, N) для Sell / lowest(low, N) для Buy")
+
 // ─────────────────────────────────────────────────────────────────────────────
 // AO Calculation  (идентично индикатору AO Cross & Color Markers)
 // ao[2] — сигнальный столбец (offset = -2 как в plotshape индикатора)
@@ -172,6 +178,57 @@ if strategy.position_size > 0 and ta.crossover(close, ma34)
 // Сброс fixedStop при закрытии позиции
 if strategy.position_size == 0
     fixedStop := na
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Стратегия «Переворот»
+// При срабатывании SL основной сделки открываем противоположную сделку по рынку.
+// Стоп: highest/lowest за revLookback баров.
+// Риск и тейк: по $riskAmount (соотношение 1:1).
+// ─────────────────────────────────────────────────────────────────────────────
+var bool  revPending  = false   // ожидает открытия переворотной сделки
+var bool  revIsBuy    = false   // направление переворота
+var int   prevClosedN = 0       // счётчик закрытых сделок предыдущего бара
+
+// Детектируем новую закрытую сделку и проверяем, был ли это SL
+if enableReversal and strategy.closedtrades > prevClosedN
+    _exitId = strategy.closedtrades.exit_id(0)
+    if _exitId == "SL Sell" or _exitId == "SL Buy"
+        revIsBuy    := _exitId == "SL Sell"   // Sell остановлен → разворот вверх
+        revPending  := true
+prevClosedN := strategy.closedtrades
+
+// Открываем переворотный ордер по рынку (на следующем баре после SL)
+if enableReversal and revPending and strategy.position_size == 0
+    if revIsBuy
+        _revSL   = ta.lowest(low, revLookback)
+        _revDist = math.abs(close - _revSL)
+        _revQty  = _revDist > 0 ? riskAmount / _revDist : 1.0
+        strategy.entry("Rev Buy", strategy.long, qty = _revQty, comment = "Rev Buy")
+    else
+        _revSL   = ta.highest(high, revLookback)
+        _revDist = math.abs(_revSL - close)
+        _revQty  = _revDist > 0 ? riskAmount / _revDist : 1.0
+        strategy.entry("Rev Sell", strategy.short, qty = _revQty, comment = "Rev Sell")
+    revPending := false
+
+// Устанавливаем стоп и тейк переворотной позиции по фактической цене входа
+if enableReversal and strategy.position_size > 0 and strategy.opentrades > 0
+    if strategy.opentrades.entry_id(0) == "Rev Buy"
+        _fill    = strategy.opentrades.entry_price(0)
+        _revSL   = ta.lowest(low, revLookback)
+        _revDist = math.abs(_fill - _revSL)
+        _revTP   = _fill + _revDist
+        strategy.exit("Rev Buy Exit", "Rev Buy", stop = _revSL, limit = _revTP,
+             comment_loss = "Rev SL", comment_profit = "Rev TP")
+
+if enableReversal and strategy.position_size < 0 and strategy.opentrades > 0
+    if strategy.opentrades.entry_id(0) == "Rev Sell"
+        _fill    = strategy.opentrades.entry_price(0)
+        _revSL   = ta.highest(high, revLookback)
+        _revDist = math.abs(_revSL - _fill)
+        _revTP   = _fill - _revDist
+        strategy.exit("Rev Sell Exit", "Rev Sell", stop = _revSL, limit = _revTP,
+             comment_loss = "Rev SL", comment_profit = "Rev TP")
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Визуализация сигналов на ценовом графике
