@@ -13,9 +13,11 @@ strategy("AO Single Bar Strategy", overlay = true, pyramiding = 0,
 // ─────────────────────────────────────────────────────────────────────────────
 // Inputs
 // ─────────────────────────────────────────────────────────────────────────────
-aoAvgLen = input.int(100,  "AO Average Lookback",  minval = 10,
-     tooltip = "Количество баров для расчёта среднего AO в каждой зоне (>0 и <0)")
-ma34Len  = input.int(34,   "MA Exit Length",       minval = 1,
+avgPosSource = input.source(close, "Avg Positive AO",
+     tooltip = "Подключить плот 'Avg Positive AO' (зелёная линия) из индикатора AO Cross & Color Markers")
+avgNegSource = input.source(close, "Avg Negative AO",
+     tooltip = "Подключить плот 'Avg Negative AO' (красная линия) из индикатора AO Cross & Color Markers")
+ma34Len      = input.int(34, "MA Exit Length", minval = 1,
      tooltip = "Период скользящей средней для выхода из позиции (синяя линия)")
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -39,32 +41,17 @@ singleBar = colorPrevPrev != 0 and colorPrev != 0 and colorNow != 0
          and colorPrevPrev == colorNow
 
 // ─────────────────────────────────────────────────────────────────────────────
-// AO Average — отдельно для положительной и отрицательной зон
-// Используем ao[1] (последний закрытый бар) для накопления статистики
-// ─────────────────────────────────────────────────────────────────────────────
-aoPos1      = ao[1] > 0 ? ao[1] : 0.0
-aoNeg1      = ao[1] < 0 ? ao[1] : 0.0
-aoPosCount1 = ao[1] > 0 ? 1.0   : 0.0
-aoNegCount1 = ao[1] < 0 ? 1.0   : 0.0
-
-sumPos = math.sum(aoPos1,      aoAvgLen)
-cntPos = math.sum(aoPosCount1, aoAvgLen)
-sumNeg = math.sum(aoNeg1,      aoAvgLen)
-cntNeg = math.sum(aoNegCount1, aoAvgLen)
-
-avgPos = cntPos > 0 ? sumPos / cntPos : na
-avgNeg = cntNeg > 0 ? sumNeg / cntNeg : na
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Сигнал: направление определяется ПОЗИЦИЕЙ ao[2] (цвет столбца игнорируется)
-//   strongSell — AO выше нуля И выше среднего положительной зоны → SHORT
-//   strongBuy  — AO ниже нуля И ниже среднего отрицательной зоны → LONG
+//   strongSell — AO выше нуля И выше средней линии положительной зоны → SHORT
+//   strongBuy  — AO ниже нуля И ниже средней линии отрицательной зоны → LONG
+// Средние берутся напрямую из индикатора AO Cross & Color Markers через source.
+// avgPosSource[2] / avgNegSource[2] — значения средних на сигнальном баре.
 // ─────────────────────────────────────────────────────────────────────────────
 sellSignal = singleBar and ao[2] > 0
 buySignal  = singleBar and ao[2] < 0
 
-strongSell = sellSignal and not na(avgPos) and ao[2] >= avgPos
-strongBuy  = buySignal  and not na(avgNeg) and math.abs(ao[2]) >= math.abs(avgNeg)
+strongSell = sellSignal and not na(avgPosSource[2]) and ao[2] >= avgPosSource[2]
+strongBuy  = buySignal  and not na(avgNegSource[2]) and math.abs(ao[2]) >= math.abs(avgNegSource[2])
 
 // ─────────────────────────────────────────────────────────────────────────────
 // MA34 — линия выхода из позиции
