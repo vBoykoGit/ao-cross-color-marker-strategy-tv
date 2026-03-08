@@ -19,6 +19,9 @@ avgNegSource   = input.source(close, "Avg Negative AO",
      tooltip = "Подключить плот 'Avg Negative AO' (красная линия) из индикатора AO Cross & Color Markers")
 ma34Len        = input.int(34, "MA Exit Length", minval = 1,
      tooltip = "Период скользящей средней для выхода из позиции (синяя линия)")
+ma34SrcType    = input.string("Close", "MA Source",
+     options  = ["Open", "High", "Low", "Close", "HL/2 — Median", "HLC/3 — Typical", "OHLC/4 — Average"],
+     tooltip  = "Ценовой ряд для расчёта скользящей средней выхода")
 maxPendingBars = input.int(10, "Макс. баров ожидания ордера", minval = 1,
      tooltip = "Отменить отложенный ордер, если он не исполнился за указанное количество баров")
 
@@ -58,7 +61,17 @@ strongBuy  = buySignal  and not na(avgNegSource[2]) and math.abs(ao[2]) >= math.
 // ─────────────────────────────────────────────────────────────────────────────
 // MA34 — линия выхода из позиции
 // ─────────────────────────────────────────────────────────────────────────────
-ma34 = ta.sma(close, ma34Len)
+ma34Src = switch ma34SrcType
+    "Open"             => open
+    "High"             => high
+    "Low"              => low
+    "Close"            => close
+    "HL/2 — Median"    => hl2
+    "HLC/3 — Typical"  => hlc3
+    "OHLC/4 — Average" => ohlc4
+    => close
+
+ma34 = ta.sma(ma34Src, ma34Len)
 plot(ma34, "MA Exit", color = color.blue, linewidth = 2)
 
 // ─────────────────────────────────────────────────────────────────────────────
