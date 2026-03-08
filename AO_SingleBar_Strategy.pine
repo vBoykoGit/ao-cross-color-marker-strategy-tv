@@ -137,13 +137,18 @@ if pendingBuy and strategy.position_size == 0
         strategy.cancel("Buy")
     else
         // Трейлинг к максимуму предыдущего бара (ждём пробой вверх)
-        // Стоп растёт только вверх (рэтчет) — бары ниже начального стопа игнорируются
+        // pendingStop фиксирован на структурном минимуме с момента сигнала — не трейлим,
+        // чтобы исключить инверсию (стоп выше входа при консолидации).
         pendingEntry := high[1]
-        pendingStop  := math.max(pendingStop, low[1])
-        _riskDist     = math.abs(pendingEntry - pendingStop)
-        _qty          = _riskDist > 0 ? riskAmount / _riskDist : 1.0
-        strategy.entry("Buy", strategy.long, stop = pendingEntry, qty = _qty,
-             comment = "SB Buy")
+        if pendingEntry <= pendingStop
+            // Цена упала ниже структурной поддержки — отменяем ордер
+            pendingBuy := false
+            strategy.cancel("Buy")
+        else
+            _riskDist = math.abs(pendingEntry - pendingStop)
+            _qty      = _riskDist > 0 ? riskAmount / _riskDist : 1.0
+            strategy.entry("Buy", strategy.long, stop = pendingEntry, qty = _qty,
+                 comment = "SB Buy")
 
 // ─────────────────────────────────────────────────────────────────────────────
 // После открытия позиции: фиксируем стоп-лосс и ждём MA34
