@@ -24,6 +24,8 @@ ma34SrcType    = input.string("Close", "MA Source",
      tooltip  = "Ценовой ряд для расчёта скользящей средней выхода")
 maxPendingBars = input.int(10, "Макс. баров ожидания ордера", minval = 1,
      tooltip = "Отменить отложенный ордер, если он не исполнился за указанное количество баров")
+stopLookback   = input.int(5,  "Lookback баров для стопа", minval = 1,
+     tooltip = "Стоп устанавливается на максимальный High (для Sell) или минимальный Low (для Buy) за последние N баров от текущей точки входа")
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AO Calculation  (идентично индикатору AO Cross & Color Markers)
@@ -87,13 +89,15 @@ var int   pendingBarIdx = na   // бар, на котором поставлен
 if strongSell and strategy.position_size == 0 and not pendingSell and not pendingBuy
     pendingSell   := true
     pendingEntry  := low[2]
-    pendingStop   := high[2]
+    // Стоп — максимальный High за stopLookback баров, заканчивая сигнальным баром[2]
+    pendingStop   := ta.highest(high, stopLookback)[2]
     pendingBarIdx := bar_index
 
 if strongBuy and strategy.position_size == 0 and not pendingSell and not pendingBuy
     pendingBuy    := true
     pendingEntry  := high[2]
-    pendingStop   := low[2]
+    // Стоп — минимальный Low за stopLookback баров, заканчивая сигнальным баром[2]
+    pendingStop   := ta.lowest(low, stopLookback)[2]
     pendingBarIdx := bar_index
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -108,8 +112,9 @@ if pendingSell and strategy.position_size == 0
         strategy.cancel("Sell")
     else
         // Трейлинг к минимуму предыдущего бара (ждём пробой вниз)
+        // Стоп — максимальный High за stopLookback баров от текущего бара
         pendingEntry := low[1]
-        pendingStop  := high[1]
+        pendingStop  := ta.highest(high, stopLookback)
         strategy.entry("Sell", strategy.short, stop = pendingEntry,
              comment = "SB Sell")
 
@@ -120,8 +125,9 @@ if pendingBuy and strategy.position_size == 0
         strategy.cancel("Buy")
     else
         // Трейлинг к максимуму предыдущего бара (ждём пробой вверх)
+        // Стоп — минимальный Low за stopLookback баров от текущего бара
         pendingEntry := high[1]
-        pendingStop  := low[1]
+        pendingStop  := ta.lowest(low, stopLookback)
         strategy.entry("Buy", strategy.long, stop = pendingEntry,
              comment = "SB Buy")
 
