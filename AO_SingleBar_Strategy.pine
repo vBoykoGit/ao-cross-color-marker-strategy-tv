@@ -3,7 +3,7 @@
 
 //@version=6
 strategy("AO Single Bar Strategy", overlay = true, pyramiding = 0,
-     default_qty_type  = strategy.percent_of_equity,
+     default_qty_type  = strategy.fixed,
      default_qty_value = 1,
      commission_type   = strategy.commission.percent,
      commission_value  = 0.1,
@@ -26,6 +26,8 @@ maxPendingBars = input.int(10, "Макс. баров ожидания ордер
      tooltip = "Отменить отложенный ордер, если он не исполнился за указанное количество баров")
 stopLookback   = input.int(5,  "Lookback баров для стопа", minval = 1,
      tooltip = "Стоп устанавливается на максимальный High (для Sell) или минимальный Low (для Buy) за последние N баров от текущей точки входа")
+riskAmount     = input.float(1000.0, "Риск на сделку ($)", minval = 0.01,
+     tooltip = "Фиксированный риск в долларах на каждую сделку. Размер позиции = Риск / |Вход − Стоп|")
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AO Calculation  (идентично индикатору AO Cross & Color Markers)
@@ -115,7 +117,9 @@ if pendingSell and strategy.position_size == 0
         // Стоп — максимальный High за stopLookback баров от текущего бара
         pendingEntry := low[1]
         pendingStop  := ta.highest(high, stopLookback)
-        strategy.entry("Sell", strategy.short, stop = pendingEntry,
+        _riskDist     = math.abs(pendingStop - pendingEntry)
+        _qty          = _riskDist > 0 ? riskAmount / _riskDist : 1.0
+        strategy.entry("Sell", strategy.short, stop = pendingEntry, qty = _qty,
              comment = "SB Sell")
 
 if pendingBuy and strategy.position_size == 0
@@ -128,7 +132,9 @@ if pendingBuy and strategy.position_size == 0
         // Стоп — минимальный Low за stopLookback баров от текущего бара
         pendingEntry := high[1]
         pendingStop  := ta.lowest(low, stopLookback)
-        strategy.entry("Buy", strategy.long, stop = pendingEntry,
+        _riskDist     = math.abs(pendingEntry - pendingStop)
+        _qty          = _riskDist > 0 ? riskAmount / _riskDist : 1.0
+        strategy.entry("Buy", strategy.long, stop = pendingEntry, qty = _qty,
              comment = "SB Buy")
 
 // ─────────────────────────────────────────────────────────────────────────────
