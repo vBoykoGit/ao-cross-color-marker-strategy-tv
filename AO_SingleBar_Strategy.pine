@@ -13,12 +13,14 @@ strategy("AO Single Bar Strategy", overlay = true, pyramiding = 0,
 // ─────────────────────────────────────────────────────────────────────────────
 // Inputs
 // ─────────────────────────────────────────────────────────────────────────────
-avgPosSource = input.source(close, "Avg Positive AO",
+avgPosSource   = input.source(close, "Avg Positive AO",
      tooltip = "Подключить плот 'Avg Positive AO' (зелёная линия) из индикатора AO Cross & Color Markers")
-avgNegSource = input.source(close, "Avg Negative AO",
+avgNegSource   = input.source(close, "Avg Negative AO",
      tooltip = "Подключить плот 'Avg Negative AO' (красная линия) из индикатора AO Cross & Color Markers")
-ma34Len      = input.int(34, "MA Exit Length", minval = 1,
+ma34Len        = input.int(34, "MA Exit Length", minval = 1,
      tooltip = "Период скользящей средней для выхода из позиции (синяя линия)")
+maxPendingBars = input.int(10, "Макс. баров ожидания ордера", minval = 1,
+     tooltip = "Отменить отложенный ордер, если он не исполнился за указанное количество баров")
 
 // ─────────────────────────────────────────────────────────────────────────────
 // AO Calculation  (идентично индикатору AO Cross & Color Markers)
@@ -66,20 +68,20 @@ var bool  pendingSell   = false
 var bool  pendingBuy    = false
 var float pendingEntry  = na   // цена стоп-ордера (trailing)
 var float pendingStop   = na   // стоп-лосс при исполнении
+var int   pendingBarIdx = na   // бар, на котором поставлен ордер
 
-// При появлении сигнала — инициализируем отложенный ордер по сигнальному бару[2]
-// Противоположный сигнал сбрасывает предыдущее ожидание
-if strongSell and strategy.position_size == 0
-    pendingSell  := true
-    pendingBuy   := false
-    pendingEntry := low[2]
-    pendingStop  := high[2]
+// Новые сигналы принимаются только если нет ни открытой позиции, ни активного ордера
+if strongSell and strategy.position_size == 0 and not pendingSell and not pendingBuy
+    pendingSell   := true
+    pendingEntry  := low[2]
+    pendingStop   := high[2]
+    pendingBarIdx := bar_index
 
-if strongBuy and strategy.position_size == 0
-    pendingBuy   := true
-    pendingSell  := false
-    pendingEntry := high[2]
-    pendingStop  := low[2]
+if strongBuy and strategy.position_size == 0 and not pendingSell and not pendingBuy
+    pendingBuy    := true
+    pendingEntry  := high[2]
+    pendingStop   := low[2]
+    pendingBarIdx := bar_index
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Трейлинг отложенного ордера
@@ -87,18 +89,28 @@ if strongBuy and strategy.position_size == 0
 // предыдущего закрытого бара. Стоп-лосс всегда соответствует тому же бару.
 // ─────────────────────────────────────────────────────────────────────────────
 if pendingSell and strategy.position_size == 0
-    // Обновляем к минимуму предыдущего бара (ждём пробой вниз)
-    pendingEntry := low[1]
-    pendingStop  := high[1]
-    strategy.entry("Sell", strategy.short, stop = pendingEntry,
-         comment = "SB Sell")
+    if bar_index - pendingBarIdx >= maxPendingBars
+        // Ордер не исполнился за maxPendingBars баров — отменяем
+        pendingSell := false
+        strategy.cancel("Sell")
+    else
+        // Трейлинг к минимуму предыдущего бара (ждём пробой вниз)
+        pendingEntry := low[1]
+        pendingStop  := high[1]
+        strategy.entry("Sell", strategy.short, stop = pendingEntry,
+             comment = "SB Sell")
 
 if pendingBuy and strategy.position_size == 0
-    // Обновляем к максимуму предыдущего бара (ждём пробой вверх)
-    pendingEntry := high[1]
-    pendingStop  := low[1]
-    strategy.entry("Buy", strategy.long, stop = pendingEntry,
-         comment = "SB Buy")
+    if bar_index - pendingBarIdx >= maxPendingBars
+        // Ордер не исполнился за maxPendingBars баров — отменяем
+        pendingBuy := false
+        strategy.cancel("Buy")
+    else
+        // Трейлинг к максимуму предыдущего бара (ждём пробой вверх)
+        pendingEntry := high[1]
+        pendingStop  := low[1]
+        strategy.entry("Buy", strategy.long, stop = pendingEntry,
+             comment = "SB Buy")
 
 // ─────────────────────────────────────────────────────────────────────────────
 // После открытия позиции: фиксируем стоп-лосс и ждём MA34
