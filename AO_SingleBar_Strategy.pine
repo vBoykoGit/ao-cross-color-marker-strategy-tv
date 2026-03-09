@@ -32,7 +32,7 @@ stopLookback   = input.int(5,  "Lookback баров для стопа", minval =
 riskAmount     = input.float(1000.0, "Риск на сделку ($)", minval = 0.01,
      tooltip = "Фиксированный риск в долларах на каждую сделку. Размер позиции = Риск / |Вход − Стоп|. Игнорируется если включён «Статичный лот».")
 useStaticLot   = input.bool(false, "Статичный лот",
-     tooltip = "Если включено — использовать фиксированный размер лота для всех основных сделок. Расчёт риска и лесенка игнорируются.")
+     tooltip = "Если включено — фиксированный лот для основных сделок. При активной лесенке лот удваивается на каждом шаге (1x, 2x, 4x, 8x). Расчёт риска по riskAmount игнорируется.")
 staticLotSize  = input.float(1.0, "Размер лота", minval = 0.000001,
      tooltip = "Фиксированный размер позиции в контрактах/лотах (активен только при включённом «Статичный лот»).")
 maxHoldBars    = input.int(20, "Макс. баров держания позиции", minval = 1,
@@ -116,15 +116,18 @@ var float pendingEntry  = na   // цена стоп-ордера (trailing)
 var float pendingStop   = na   // стоп-лосс при исполнении
 var int   pendingBarIdx = na   // бар, на котором поставлен ордер
 
+// Объявляем здесь, т.к. используется в условии приёма нового сигнала выше блока «Переворот»
+var bool  revPending    = false
+
 // Новые сигналы принимаются только если нет ни открытой позиции, ни активного ордера
-if strongSell and strategy.position_size == 0 and not pendingSell and not pendingBuy
+if strongSell and strategy.position_size == 0 and not pendingSell and not pendingBuy and not revPending
     pendingSell   := true
     pendingEntry  := low[2]
     // Стоп — максимальный High за stopLookback баров, заканчивая сигнальным баром[2]
     pendingStop   := ta.highest(high, stopLookback)[2]
     pendingBarIdx := bar_index
 
-if strongBuy and strategy.position_size == 0 and not pendingSell and not pendingBuy
+if strongBuy and strategy.position_size == 0 and not pendingSell and not pendingBuy and not revPending
     pendingBuy    := true
     pendingEntry  := high[2]
     // Стоп — минимальный Low за stopLookback баров, заканчивая сигнальным баром[2]
@@ -146,14 +149,19 @@ if pendingSell and strategy.position_size == 0
         // Стоп оценивается динамически — та же формула, что при фиксации fixedStop на баре входа.
         pendingEntry   := low[1]
         _stopEst        = ta.highest(high, stopLookback)
-        _riskDist       = math.abs(_stopEst - pendingEntry)
-        _stepRisk      = ladderMaxSteps > 0 ? riskAmount + math.max(0.0, ladderCumProfit) : riskAmount
-        _qty           = useStaticLot ?
-             staticLotSize * math.pow(2, ladderMaxSteps > 0 ? ladderStep - 1 : 0) :
-             (_riskDist > 0 ? _stepRisk / _riskDist : 1.0)
-        _comment       = ladderMaxSteps > 0 ? "SB Sell S" + str.tostring(ladderStep) : "SB Sell"
-        strategy.entry("Sell", strategy.short, stop = pendingEntry, qty = _qty,
-             comment = _comment)
+        if _stopEst <= pendingEntry
+            // Стоп ниже или равен цене входа — позиция была бы немедленно остановлена, отменяем
+            pendingSell := false
+            strategy.cancel("Sell")
+        else
+            _riskDist  = math.abs(_stopEst - pendingEntry) * syminfo.pointvalue
+            _stepRisk  = ladderMaxSteps > 0 ? riskAmount + math.max(0.0, ladderCumProfit) : riskAmount
+            _qty       = useStaticLot ?
+                 staticLotSize * math.pow(2, ladderMaxSteps > 0 ? ladderStep - 1 : 0) :
+                 (_riskDist > 0 ? _stepRisk / _riskDist : 1.0)
+            _comment   = ladderMaxSteps > 0 ? "SB Sell S" + str.tostring(ladderStep) : "SB Sell"
+            strategy.entry("Sell", strategy.short, stop = pendingEntry, qty = _qty,
+                 comment = _comment)
 
 if pendingBuy and strategy.position_size == 0
     if bar_index - pendingBarIdx >= maxPendingBars
@@ -170,7 +178,7 @@ if pendingBuy and strategy.position_size == 0
             pendingBuy := false
             strategy.cancel("Buy")
         else
-            _riskDist = math.abs(pendingEntry - _stopEst)
+            _riskDist = math.abs(pendingEntry - _stopEst) * syminfo.pointvalue
             _stepRisk = ladderMaxSteps > 0 ? riskAmount + math.max(0.0, ladderCumProfit) : riskAmount
             _qty      = useStaticLot ?
                  staticLotSize * math.pow(2, ladderMaxSteps > 0 ? ladderStep - 1 : 0) :
@@ -195,21 +203,39 @@ if strategy.position_size > 0 and pendingBuy
     pendingBuy := false
     fixedStop  := ta.lowest(low, stopLookback)
 
-// Выход по стоп-лоссу (фиксированный)
-if strategy.position_size < 0 and not na(fixedStop)
-    strategy.exit("SL Sell", "Sell", stop = fixedStop)
+// Два раздельных ордера для SL и TP MA34 на одну позицию (OCA — один отменяет другой).
+// Разные ID критически важны: детектор разворота ищет exit_id == "SL Sell"/"SL Buy",
+// поэтому TP выход должен иметь другой ID, иначе разворот открывался бы после каждого TP.
 
-if strategy.position_size > 0 and not na(fixedStop)
-    strategy.exit("SL Buy", "Buy", stop = fixedStop)
+// 1. Стоп-лосс — фиксированный уровень, ID "SL Sell"/"SL Buy" виден детектору разворота
+if strategy.position_size < 0 and not na(fixedStop) and strategy.opentrades > 0
+    if strategy.opentrades.entry_id(0) == "Sell"
+        strategy.exit("SL Sell", "Sell",
+             stop         = fixedStop,
+             comment_loss = "SL")
 
-// Выход по MA34: close достиг или пересёк MA34 в направлении цели
-//   SHORT: close <= MA34 (цена упала до MA34 или ниже)
-//   LONG:  close >= MA34 (цена выросла до MA34 или выше)
-if strategy.position_size < 0 and close <= ma34
-    strategy.close("Sell", comment = "TP MA34")
+if strategy.position_size > 0 and not na(fixedStop) and strategy.opentrades > 0
+    if strategy.opentrades.entry_id(0) == "Buy"
+        strategy.exit("SL Buy", "Buy",
+             stop         = fixedStop,
+             comment_loss = "SL")
 
-if strategy.position_size > 0 and close >= ma34
-    strategy.close("Buy", comment = "TP MA34")
+// 2. Тейк-профит MA34 — лимитный ордер, ID "TP Sell"/"TP Buy" НЕ виден детектору разворота.
+//    limit обновляется каждый бар → точное исполнение по уровню MA34.
+//    Profit-zone check: limit = na если MA34 не в зоне прибыли (только стоп активен).
+if strategy.position_size < 0 and not na(fixedStop) and strategy.opentrades > 0
+    if strategy.opentrades.entry_id(0) == "Sell"
+        _ep = strategy.opentrades.entry_price(0)
+        strategy.exit("TP Sell", "Sell",
+             limit          = ma34 < _ep ? ma34 : na,
+             comment_profit = "TP MA34")
+
+if strategy.position_size > 0 and not na(fixedStop) and strategy.opentrades > 0
+    if strategy.opentrades.entry_id(0) == "Buy"
+        _ep = strategy.opentrades.entry_price(0)
+        strategy.exit("TP Buy", "Buy",
+             limit          = ma34 > _ep ? ma34 : na,
+             comment_profit = "TP MA34")
 
 // Сброс fixedStop при закрытии позиции
 if strategy.position_size == 0
@@ -249,30 +275,23 @@ if strategy.position_size == 0
 // Стоп: highest/lowest за revLookback баров.
 // Риск и тейк: по $riskAmount (соотношение 1:1).
 // ─────────────────────────────────────────────────────────────────────────────
-var bool  revPending  = false   // ожидает открытия переворотной сделки
+// revPending объявлен выше (перед блоком приёма сигналов)
 var bool  revIsBuy    = false   // направление переворота
 var int   prevClosedN = 0       // счётчик закрытых сделок предыдущего бара
-var float revOrigDist = na      // дистанция риска закрытой основной сделки
 var float revSLLevel  = na      // зафиксированный стоп разворота
-var float revTPLevel  = na      // зафиксированный тейк разворота
 
 // Детектируем новую закрытую сделку и проверяем, был ли это SL
 if enableReversal and strategy.closedtrades > prevClosedN
     _idx    = strategy.closedtrades - 1
     _exitId = strategy.closedtrades.exit_id(_idx)
     if _exitId == "SL Sell" or _exitId == "SL Buy"
-        _slPrice = strategy.closedtrades.exit_price(_idx)
         revIsBuy := _exitId == "SL Sell"   // Sell остановлен → разворот вверх
         revPending := true
         // Структурный стоп фиксируется однократно в момент обнаружения SL
         if revIsBuy
-            revSLLevel  := ta.lowest(low,  revLookback)
-            revOrigDist := math.abs(_slPrice - revSLLevel)
-            revTPLevel  := _slPrice + revOrigDist
+            revSLLevel := ta.lowest(low,  revLookback)
         else
-            revSLLevel  := ta.highest(high, revLookback)
-            revOrigDist := math.abs(revSLLevel - _slPrice)
-            revTPLevel  := _slPrice - revOrigDist
+            revSLLevel := ta.highest(high, revLookback)
 prevClosedN := strategy.closedtrades
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -309,26 +328,31 @@ prevLadderN := strategy.closedtrades
 // чтобы loss при срабатывании стопа ≈ revRiskAmount
 if enableReversal and revPending and strategy.position_size == 0
     if revIsBuy
-        _dist   = math.abs(close - revSLLevel)
+        _dist   = math.abs(close - revSLLevel) * syminfo.pointvalue
         _revQty = _dist > 0 ? revRiskAmount / _dist : 1.0
         strategy.entry("Rev Buy",  strategy.long,  qty = _revQty, comment = "Rev Buy")
     else
-        _dist   = math.abs(revSLLevel - close)
+        _dist   = math.abs(revSLLevel - close) * syminfo.pointvalue
         _revQty = _dist > 0 ? revRiskAmount / _dist : 1.0
         strategy.entry("Rev Sell", strategy.short, qty = _revQty, comment = "Rev Sell")
     revPending := false
 
-// Устанавливаем стоп и тейк переворотной позиции по зафиксированным уровням
+// Устанавливаем стоп и тейк переворотной позиции.
+// TP рассчитывается от реальной цены входа (не от _slPrice) для точного 1:1 R:R.
 if enableReversal and strategy.position_size > 0 and strategy.opentrades > 0
     if strategy.opentrades.entry_id(0) == "Rev Buy"
+        _revEntryPrice = strategy.opentrades.entry_price(0)
+        _revTP         = _revEntryPrice + (_revEntryPrice - revSLLevel)
         strategy.exit("Rev Buy Exit", "Rev Buy",
-             stop = revSLLevel, limit = revTPLevel,
+             stop = revSLLevel, limit = _revTP,
              comment_loss = "Rev SL", comment_profit = "Rev TP")
 
 if enableReversal and strategy.position_size < 0 and strategy.opentrades > 0
     if strategy.opentrades.entry_id(0) == "Rev Sell"
+        _revEntryPrice = strategy.opentrades.entry_price(0)
+        _revTP         = _revEntryPrice - (revSLLevel - _revEntryPrice)
         strategy.exit("Rev Sell Exit", "Rev Sell",
-             stop = revSLLevel, limit = revTPLevel,
+             stop = revSLLevel, limit = _revTP,
              comment_loss = "Rev SL", comment_profit = "Rev TP")
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -352,3 +376,7 @@ plot(pendingBuy and strategy.position_size == 0 ? pendingEntry : na,
      "Pending Buy Entry",  color = color.green, style = plot.style_linebr, linewidth = 1)
 plot(pendingBuy and strategy.position_size == 0 ? pendingStop  : na,
      "Pending Buy Stop",   color = color.green, style = plot.style_linebr, linewidth = 1)
+
+// Реальный зафиксированный стоп (устанавливается на баре входа, может отличаться от pendingStop)
+plot(strategy.position_size != 0 and not na(fixedStop) ? fixedStop : na,
+     "Active Stop", color = color.orange, style = plot.style_linebr, linewidth = 2)
