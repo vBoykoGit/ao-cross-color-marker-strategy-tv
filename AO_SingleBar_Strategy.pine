@@ -28,7 +28,7 @@ ma34SrcType    = input.string("Close", "MA Source",
 maxPendingBars = input.int(10, "Макс. баров ожидания ордера", minval = 1,
      tooltip = "Отменить отложенный ордер, если он не исполнился за указанное количество баров")
 stopLookback   = input.int(5,  "Lookback баров для стопа", minval = 1,
-     tooltip = "Стоп устанавливается на максимальный High (для Sell) или минимальный Low (для Buy) за последние N баров от текущей точки входа")
+     tooltip = "Стоп фиксируется в момент исполнения ордера: максимальный High (для Sell) или минимальный Low (для Buy) за последние N баров от бара входа")
 riskAmount     = input.float(1000.0, "Риск на сделку ($)", minval = 0.01,
      tooltip = "Фиксированный риск в долларах на каждую сделку. Размер позиции = Риск / |Вход − Стоп|. Игнорируется если включён «Статичный лот».")
 useStaticLot   = input.bool(false, "Статичный лот",
@@ -184,14 +184,14 @@ if pendingBuy and strategy.position_size == 0
 // Фиксированный стоп-лосс (устанавливается при исполнении ордера)
 var float fixedStop = na
 
-// При переходе из ожидания к позиции — фиксируем стоп
+// При переходе из ожидания к позиции — фиксируем стоп на баре входа
 if strategy.position_size < 0 and pendingSell
     pendingSell := false
-    fixedStop   := pendingStop
+    fixedStop   := ta.highest(high, stopLookback)
 
 if strategy.position_size > 0 and pendingBuy
     pendingBuy := false
-    fixedStop  := pendingStop
+    fixedStop  := ta.lowest(low, stopLookback)
 
 // Выход по стоп-лоссу (фиксированный)
 if strategy.position_size < 0 and not na(fixedStop)
