@@ -278,14 +278,19 @@ if ladderMaxSteps > 0 and strategy.closedtrades > prevLadderN
             ladderStep      := 1
             ladderCumProfit := 0.0
         else
-            // Выход не по стопу — добавляем прибыль и переходим к следующему шагу
-            ladderCumProfit += strategy.closedtrades.profit(_idx)
-            if ladderStep >= ladderMaxSteps
-                // Достигли максимума шагов — сброс
+            // Выход не по стопу — проверяем прибыль: убыток тоже сбрасывает лесенку
+            _profit = strategy.closedtrades.profit(_idx)
+            if _profit < 0
                 ladderStep      := 1
                 ladderCumProfit := 0.0
             else
-                ladderStep += 1
+                ladderCumProfit += _profit
+                if ladderStep >= ladderMaxSteps
+                    // Достигли максимума шагов — сброс
+                    ladderStep      := 1
+                    ladderCumProfit := 0.0
+                else
+                    ladderStep += 1
 prevLadderN := strategy.closedtrades
 
 // Открываем переворотный ордер по рынку (на следующем баре после SL)
