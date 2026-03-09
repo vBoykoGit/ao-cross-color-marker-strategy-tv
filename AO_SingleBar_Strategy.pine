@@ -223,7 +223,10 @@ if strategy.position_size != 0 and strategy.position_size[1] == 0
     posOpenBar := bar_index
 
 // Закрываем по рынку если время вышло и позиция не в убытке
-if strategy.position_size != 0 and not na(posOpenBar)
+// Разворотные сделки из выхода по времени исключены — они закрываются только по TP/SL
+_activeId   = strategy.opentrades > 0 ? strategy.opentrades.entry_id(0) : ""
+_isRevTrade = _activeId == "Rev Buy" or _activeId == "Rev Sell"
+if strategy.position_size != 0 and not na(posOpenBar) and not _isRevTrade
     if bar_index - posOpenBar >= maxHoldBars and strategy.openprofit >= 0
         strategy.close_all(comment = "Time Exit")
         posOpenBar := na
