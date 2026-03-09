@@ -141,9 +141,9 @@ if pendingSell and strategy.position_size == 0
         strategy.cancel("Sell")
     else
         // Трейлинг к минимуму предыдущего бара (ждём пробой вниз)
-        // Стоп растёт только вверх (рэтчет) — исходный уровень от сигнала сохраняется
-        pendingEntry  := low[1]
-        pendingStop   := math.max(pendingStop, high[1])
+        // pendingStop фиксирован на структурном максимуме с момента сигнала — не трейлим,
+        // чтобы исключить уход стопа недостижимо далеко при росте цены во время ожидания.
+        pendingEntry := low[1]
         _riskDist      = math.abs(pendingStop - pendingEntry)
         _stepRisk      = ladderMaxSteps > 0 ? riskAmount + math.max(0.0, ladderCumProfit) : riskAmount
         _qty           = useStaticLot ?
