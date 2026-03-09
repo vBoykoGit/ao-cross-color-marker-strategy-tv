@@ -99,6 +99,11 @@ plot(ma34, "MA Exit", color = color.blue, linewidth = 2)
 // ─────────────────────────────────────────────────────────────────────────────
 // Состояние отложенного ордера
 // ─────────────────────────────────────────────────────────────────────────────
+// Лесенка (объявляем здесь, т.к. используется в блоке трейлинга ниже)
+var int   ladderStep      = 1    // текущий шаг (1 = первый)
+var float ladderCumProfit = 0.0  // накопленная прибыль предыдущих шагов
+var int   prevLadderN     = 0    // счётчик закрытых сделок для лесенки
+
 var bool  pendingSell   = false
 var bool  pendingBuy    = false
 var float pendingEntry  = na   // цена стоп-ордера (trailing)
@@ -231,11 +236,6 @@ var int   prevClosedN = 0       // счётчик закрытых сделок 
 var float revOrigDist = na      // дистанция риска закрытой основной сделки
 var float revSLLevel  = na      // зафиксированный стоп разворота
 var float revTPLevel  = na      // зафиксированный тейк разворота
-
-// Лесенка
-var int   ladderStep      = 1    // текущий шаг (1 = первый)
-var float ladderCumProfit = 0.0  // накопленная прибыль предыдущих шагов
-var int   prevLadderN     = 0    // счётчик закрытых сделок для лесенки
 
 // Детектируем новую закрытую сделку и проверяем, был ли это SL
 if enableReversal and strategy.closedtrades > prevClosedN
