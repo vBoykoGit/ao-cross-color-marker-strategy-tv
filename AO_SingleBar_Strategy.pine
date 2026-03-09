@@ -145,9 +145,10 @@ if pendingSell and strategy.position_size == 0
         pendingEntry  := low[1]
         pendingStop   := math.max(pendingStop, high[1])
         _riskDist      = math.abs(pendingStop - pendingEntry)
-        _baseRisk      = useStaticLot ? staticLotSize * _riskDist : riskAmount
-        _stepRisk      = ladderMaxSteps > 0 ? _baseRisk + math.max(0.0, ladderCumProfit) : _baseRisk
-        _qty           = _riskDist > 0 ? _stepRisk / _riskDist : staticLotSize
+        _stepRisk      = ladderMaxSteps > 0 ? riskAmount + math.max(0.0, ladderCumProfit) : riskAmount
+        _qty           = useStaticLot ?
+             staticLotSize * math.pow(2, ladderMaxSteps > 0 ? ladderStep - 1 : 0) :
+             (_riskDist > 0 ? _stepRisk / _riskDist : 1.0)
         _comment       = ladderMaxSteps > 0 ? "SB Sell S" + str.tostring(ladderStep) : "SB Sell"
         strategy.entry("Sell", strategy.short, stop = pendingEntry, qty = _qty,
              comment = _comment)
@@ -168,9 +169,10 @@ if pendingBuy and strategy.position_size == 0
             strategy.cancel("Buy")
         else
             _riskDist = math.abs(pendingEntry - pendingStop)
-            _baseRisk = useStaticLot ? staticLotSize * _riskDist : riskAmount
-            _stepRisk = ladderMaxSteps > 0 ? _baseRisk + math.max(0.0, ladderCumProfit) : _baseRisk
-            _qty      = _riskDist > 0 ? _stepRisk / _riskDist : staticLotSize
+            _stepRisk = ladderMaxSteps > 0 ? riskAmount + math.max(0.0, ladderCumProfit) : riskAmount
+            _qty      = useStaticLot ?
+                 staticLotSize * math.pow(2, ladderMaxSteps > 0 ? ladderStep - 1 : 0) :
+                 (_riskDist > 0 ? _stepRisk / _riskDist : 1.0)
             _comment  = ladderMaxSteps > 0 ? "SB Buy S" + str.tostring(ladderStep) : "SB Buy"
             strategy.entry("Buy", strategy.long, stop = pendingEntry, qty = _qty,
                  comment = _comment)
