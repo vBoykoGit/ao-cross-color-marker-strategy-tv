@@ -240,11 +240,16 @@ if enableReversal and strategy.closedtrades > prevClosedN
 prevClosedN := strategy.closedtrades
 
 // Открываем переворотный ордер по рынку (на следующем баре после SL)
+// Qty пересчитывается по текущему close как оценке цены входа,
+// чтобы loss при срабатывании стопа ≈ revRiskAmount
 if enableReversal and revPending and strategy.position_size == 0
-    _revQty = revOrigDist > 0 ? revRiskAmount / revOrigDist : 1.0
     if revIsBuy
+        _dist   = math.abs(close - revSLLevel)
+        _revQty = _dist > 0 ? revRiskAmount / _dist : 1.0
         strategy.entry("Rev Buy",  strategy.long,  qty = _revQty, comment = "Rev Buy")
     else
+        _dist   = math.abs(revSLLevel - close)
+        _revQty = _dist > 0 ? revRiskAmount / _dist : 1.0
         strategy.entry("Rev Sell", strategy.short, qty = _revQty, comment = "Rev Sell")
     revPending := false
 
